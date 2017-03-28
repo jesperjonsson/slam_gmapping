@@ -1,3 +1,7 @@
 [*.cpp]
 indent_style = space
 indent_size = 2
+
+[*.srv]
+indent_style = space
+indent_size = 2
