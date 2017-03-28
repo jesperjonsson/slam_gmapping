@@ -25,7 +25,7 @@ main(int argc, char** argv)
 {
   ros::init(argc, argv, "slam_gmapping");
 
-  SlamGMapping gn;
+  SlamGMapping1 gn;
   gn.startLiveSlam();
   ros::spin();
 

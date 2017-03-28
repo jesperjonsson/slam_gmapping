@@ -258,10 +258,13 @@ void SlamGMapping::startLiveSlam()
   entropy_publisher_ = private_nh_.advertise<std_msgs::Float64>("entropy", 1, true);
   sst_ = node_.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
   sstm_ = node_.advertise<nav_msgs::MapMetaData>("map_metadata", 1, true);
+  pub_traj_ = node_.advertise<nav_msgs::Path>("trajectory", 1, true);
   ss_ = node_.advertiseService("dynamic_map", &SlamGMapping::mapCallback, this);
   scan_filter_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(node_, "scan", 5);
   scan_filter_ = new tf::MessageFilter<sensor_msgs::LaserScan>(*scan_filter_sub_, tf_, odom_frame_, 5);
   scan_filter_->registerCallback(boost::bind(&SlamGMapping::laserCallback, this, _1));
+
+  ROS_INFO("[Gmapping] RUNNING CUSTOM VERSION OF GMAPPING");
 
   transform_thread_ = new boost::thread(boost::bind(&SlamGMapping::publishLoop, this, transform_publish_period_));
 }
@@ -699,19 +702,39 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
                                 delta_);
 
   ROS_DEBUG("Trajectory tree:");
+  nav_msgs::Path trajectory;
+  std::vector<geometry_msgs::PoseStamped> poses;
   for(GMapping::GridSlamProcessor::TNode* n = best.node;
       n;
       n = n->parent)
   {
-    ROS_DEBUG("  %.3f %.3f %.3f",
-              n->pose.x,
-              n->pose.y,
-              n->pose.theta);
     if(!n->reading)
     {
       ROS_DEBUG("Reading is NULL");
       continue;
     }
+
+    ROS_DEBUG("%f:  %.3f %.3f %.3f",
+             n->reading->getTime(),
+             n->pose.x,
+             n->pose.y,
+             n->pose.theta);
+
+    geometry_msgs::PoseStamped poseStamped;
+    double t = n->reading->getTime();
+    poseStamped.header.stamp = ros::Time(t);
+    poseStamped.header.frame_id = tf_.resolve( map_frame_ );
+    poseStamped.pose.position.x = n->pose.x;
+    poseStamped.pose.position.y = n->pose.y;
+
+    tf::Quaternion orientation;
+    orientation.setEuler(n->pose.theta, 0, 0);
+    poseStamped.pose.orientation.x = orientation.x();
+    poseStamped.pose.orientation.y = orientation.y();
+    poseStamped.pose.orientation.z = orientation.z();
+    poseStamped.pose.orientation.w = orientation.w();
+
+    trajectory.poses.push_back(poseStamped);
     matcher.invalidateActiveArea();
     matcher.computeActiveArea(smap, n->pose, &((*n->reading)[0]));
     matcher.registerScan(smap, n->pose, &((*n->reading)[0]));
@@ -763,9 +786,12 @@ SlamGMapping::updateMap(const sensor_msgs::LaserScan& scan)
   //make sure to set the header information on the map
   map_.map.header.stamp = ros::Time::now();
   map_.map.header.frame_id = tf_.resolve( map_frame_ );
-
   sst_.publish(map_.map);
   sstm_.publish(map_.map.info);
+
+  trajectory.header.stamp = ros::Time::now();
+  trajectory.header.frame_id = tf_.resolve( map_frame_ );
+  pub_traj_.publish(trajectory);
 }
 
 bool 
